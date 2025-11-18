@@ -1,0 +1,47 @@
+# PromptLine Configuration Example
+# Copy this to ~/.promptline/config.yaml or ./.promptline/config.yaml
+
+models:
+  default: "gpt-3.5-turbo"  # Use gpt-3.5-turbo (widely available) or gpt-4 if you have access
+  providers:
+    openai:
+      api_key: "${OPENAI_API_KEY}"  # Use environment variable
+      models:
+        - gpt-4
+        - gpt-3.5-turbo
+      default_params:
+        temperature: 0.2
+        max_tokens: 4096
+
+tools:
+  file_read: allow        # Auto-execute (read-only, safe)
+  file_write: ask         # Prompt for approval
+  file_delete: deny       # Never allow
+  shell_execute: ask      # Prompt for approval
+
+safety:
+  require_approval: true
+  require_diff_preview: true
+  max_iterations: 10
+  enable_backups: true
+  
+  dangerous_commands:
+    - "rm -rf /"
+    - "rm -rf *"
+    - "mkfs"
+    - "dd if="
+    - "format"
+  
+  protected_patterns:
+    - "**/.env"
+    - "**/.env.*"
+    - "**/*secret*"
+    - "**/*password*"
+    - "**/*.pem"
+    - "**/*.key"
+    - "**/id_rsa"
+
+agent:
+  default_mode: "plan"
+  use_chain_of_thought: true
+  explain_before_action: true

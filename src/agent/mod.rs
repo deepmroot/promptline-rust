@@ -5,11 +5,13 @@ use crate::error::{AgentError, Result};
 use crate::model::{LanguageModel, Message};
 use crate::tools::{ToolContext, ToolRegistry, Tool};
 use crate::prompt::templates::TemplateManager;
-use dialoguer::{Confirm, theme::ColorfulTheme};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::safety::SafetyValidator;
+use crate::permissions::PermissionManager;
+use crate::formatter::ResponseFormatter;
+use crate::loading::LoadingIndicator;
 
 /// Agent for orchestrating LLM interactions and tool execution
 pub struct Agent {
@@ -17,7 +19,9 @@ pub struct Agent {
     tools: ToolRegistry,
     config: Config,
     safety_validator: SafetyValidator,
+    permission_manager: PermissionManager,
     template_manager: TemplateManager,
+    formatter: ResponseFormatter,
     iteration_count: usize,
     pub conversation_history: Vec<Message>,
 }
@@ -40,13 +44,17 @@ impl Agent {
         conversation_history: Vec<Message>,
     ) -> Result<Self> {
         let safety_validator = SafetyValidator::new(config.clone())?;
+        let permission_manager = PermissionManager::new()?;
         let template_manager = TemplateManager::new().await?;
+        let formatter = ResponseFormatter::new();
         Ok(Self {
             model,
             tools,
             config,
             safety_validator,
+            permission_manager,
             template_manager,
+            formatter,
             iteration_count: 0,
             conversation_history,
         })
@@ -59,7 +67,7 @@ impl Agent {
         self.iteration_count = 0;
 
         // Add system prompt
-        let system_prompt = self.build_system_prompt();
+        let system_prompt = self.build_system_prompt().await;
         self.conversation_history
             .push(Message::system(system_prompt));
 
@@ -79,20 +87,30 @@ impl Agent {
 
             tracing::debug!("Agent iteration: {}", self.iteration_count);
 
-            // REASON: Get model response
+            // REASON: Get model response with loading indicator
+            let mut loading = LoadingIndicator::new();
+            loading.start();
             let response = self.model.chat(&self.conversation_history).await?;
+            loading.stop().await;
 
             // Inject file content if mentioned in response
-            self.inject_file_content(&response.content).await?;
+            // DISABLED: This was causing loops where the agent would mention files
+            // and then try to auto-read them, leading to infinite loops
+            // The agent should explicitly use file_read tool instead
+            // self.inject_file_content(&response.content).await?;
 
             // Check if task is complete
+            tracing::info!("Response content: {:?}", response.content);
             if self.is_complete(&response.content) {
+                tracing::info!("Task complete detected!");
                 return Ok(AgentResult {
                     success: true,
                     output: response.content,
                     iterations: self.iteration_count,
                     tool_calls,
                 });
+            } else {
+                tracing::info!("Task not complete, continuing...");
             }
 
             // ACT: Parse and execute tool calls
@@ -112,29 +130,30 @@ impl Agent {
     async fn execute_tool_call(&mut self, tool_call: ParsedToolCall, tool_calls: &mut Vec<String>) -> Result<AgentResult> {
         tracing::info!("Executing tool: {}", tool_call.name);
 
-        // Check tool permission
-        let permission = self.config.tools.get_tool_permission(&tool_call.name);
-        match permission {
-            crate::config::PermissionLevel::Deny => {
+        // Check permission using the new permission manager
+        use crate::permissions::PermissionLevel;
+        let permission_level = self.permission_manager.check_permission(&tool_call.name);
+        
+        match permission_level {
+            PermissionLevel::Never => {
                 return Err(crate::error::ToolError::PermissionDenied(tool_call.name).into());
             }
-            crate::config::PermissionLevel::Ask => {
-                if self.config.safety.require_approval {
-                    let confirmation = Confirm::with_theme(&ColorfulTheme::default())
-                        .with_prompt(format!("Execute tool '{}' with args: {}?", tool_call.name, tool_call.args))
-                        .interact()?;
-
-                    if !confirmation {
-                        return Ok(AgentResult {
-                            success: false,
-                            output: "User denied tool execution.".to_string(),
-                            iterations: self.iteration_count,
-                            tool_calls: tool_calls.clone(),
-                        });
-                    }
+            PermissionLevel::Ask => {
+                // Prompt user for permission
+                let allowed = self.permission_manager.prompt_for_permission(&tool_call.name)
+                    .map_err(|e| crate::error::PromptLineError::Other(e.to_string()))?;
+                if !allowed {
+                    return Ok(AgentResult {
+                        success: false,
+                        output: "Permission denied.".to_string(),
+                        iterations: self.iteration_count,
+                        tool_calls: tool_calls.clone(),
+                    });
                 }
             }
-            crate::config::PermissionLevel::Allow => {}
+            PermissionLevel::Once | PermissionLevel::Always => {
+                // Permission already granted
+            }
         }
 
         // Validate command
@@ -165,20 +184,29 @@ impl Agent {
                 ctx.git_branch = Some(String::from_utf8_lossy(&output.stdout).trim().to_string());
             }
         }
+        // Execute the tool
         let result = self
             .tools
             .execute(&tool_call.name, tool_call.args, &ctx, &self.config)
             .await?;
 
-        // OBSERVE: Add result to conversation
+        // Show formatted result to user
+        let result_text = if result.success {
+            &result.output
+        } else {
+            result.error.as_ref().unwrap_or(&result.output)
+        };
+        
+        let formatted_output = self.formatter.format_tool_result(&tool_call.name, result_text);
+        print!("{}", formatted_output);
+        use std::io::Write;
+        std::io::stdout().flush().ok();
+
+        // OBSERVE: Add result to conversation (for the model)
         let observation = format!(
             "Tool '{}' result: {}",
             tool_call.name,
-            if result.success {
-                &result.output
-            } else {
-                result.error.as_ref().unwrap_or(&result.output)
-            }
+            result_text
         );
 
         self.conversation_history
@@ -192,7 +220,7 @@ impl Agent {
         })
     }
 
-    fn build_system_prompt(&self) -> String {
+    async fn build_system_prompt(&self) -> String {
         let tool_descriptions: Vec<String> = self
             .tools
             .definitions()
@@ -248,31 +276,24 @@ impl Agent {
             self.default_system_prompt()
         };
 
-        let project_context = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let context_manager = crate::context::ContextManager::new().await?;
-                context_manager.load_project_context().await
-            })
-            .unwrap_or_else(|e| {
+        let project_context = match crate::context::ContextManager::new().await {
+            Ok(context_manager) => context_manager.load_project_context().await.ok().flatten(),
+            Err(e) => {
                 tracing::warn!("Failed to load project context: {}", e);
                 None
-            });
+            }
+        };
 
-        let project_type = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let context_manager = crate::context::ContextManager::new().await?;
-                context_manager.detect_project_type().await
-            })
-            .unwrap_or_else(|e| {
+        let project_type = match crate::context::ContextManager::new().await {
+            Ok(context_manager) => context_manager.detect_project_type().await.unwrap_or_else(|e| {
                 tracing::warn!("Failed to detect project type: {}", e);
                 "Generic".to_string()
-            });
+            }),
+            Err(e) => {
+                tracing::warn!("Failed to create context manager: {}", e);
+                "Generic".to_string()
+            }
+        };
 
         let mut final_prompt = String::new();
         if let Some(context) = project_context {
@@ -304,7 +325,34 @@ Always explain your reasoning before taking an action."###,
     }
 
     fn default_system_prompt(&self) -> String {
-        r###"You are PromptLine, an AI assistant that helps with coding and system tasks."###.to_string()
+        r###"You are PromptLine, an AI coding assistant built to help developers with their tasks.
+
+IDENTITY:
+- Your name is PromptLine (not Cogito, Claude, GPT, or any other model name)
+- You are a professional, helpful coding assistant
+- Never mention your underlying model or AI provider
+
+IMPORTANT GUIDELINES:
+- For simple greetings (hi, hello, hey) or casual conversation, just respond naturally WITHOUT using any tools, then say FINISH
+- Only use tools when the user asks you to DO something specific (read a file, search code, list files, etc.)
+- When you use a tool, explain what you're doing briefly
+- ALWAYS end your response with "FINISH" on a new line when done
+- Be concise and professional in your responses
+
+AVAILABLE TOOLS:
+- file_read: Read file contents
+- file_write: Write to a file
+- file_list: List directory contents
+- git_status: Check git status
+- git_diff: Show git diff
+- web_get: Fetch web content
+- codebase_search: Search code
+
+TOOL USAGE FORMAT:
+When you need to use a tool, respond with:
+{"tool": "tool_name", "args": {"arg1": "value1"}}
+
+Remember: Don't use tools for simple conversation - just chat naturally!"###.to_string()
     }
 
     fn parse_tool_call(&self, content: &str) -> Option<ParsedToolCall> {
@@ -329,12 +377,20 @@ Always explain your reasoning before taking an action."###,
         content.trim().ends_with("FINISH") || content.contains("task is complete")
     }
 
+    /// Format a response using the formatter (strip model identity, clean up)
+    pub fn format_response(&self, content: &str) -> String {
+        self.formatter.format_response(content)
+    }
+
     async fn inject_file_content(&mut self, model_response_content: &str) -> Result<()> {
-        let re = Regex::new(r"(\S+\.(rs|toml|yaml|md|txt|json|lock|sh|ps1))").unwrap();
+        // Stricter regex: allow alphanumeric, underscores, dashes, dots, and slashes.
+        // Must start and end with word boundary or whitespace-like boundary.
+        // Avoids matching quotes, brackets, etc.
+        let re = Regex::new(r"(?m)(^|\s|['`])([\w\-\./]+\.(rs|toml|yaml|md|txt|json|lock|sh|ps1))\b").unwrap();
         let file_read_tool = crate::tools::file_ops::FileReadTool::new();
 
-        for mat in re.find_iter(model_response_content) {
-            let file_path = mat.as_str();
+        for mat in re.captures_iter(model_response_content) {
+            let file_path = mat.get(2).map_or("", |m| m.as_str());
             // Check if the file content is already in the history to avoid duplicates
             if !self.conversation_history.iter().any(|msg| msg.content.contains(&format!("File content of {}:\n```", file_path))) {
                 tracing::info!("Injecting content of file: {}", file_path);
@@ -436,7 +492,7 @@ mod tests {
 
         let mut config = Config::default();
         config.safety.require_approval = false;
-        let mut agent = Agent::new(model, tools, config, Vec::new()).unwrap();
+        let mut agent = Agent::new(model, tools, config, Vec::new()).await.unwrap();
 
         let result = agent.run("List the files").await.unwrap();
 

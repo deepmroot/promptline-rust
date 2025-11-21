@@ -50,6 +50,9 @@ pub struct ProviderConfig {
     /// Default parameters
     #[serde(default)]
     pub default_params: ModelParams,
+
+    /// Base URL for the API (optional)
+    pub base_url: Option<String>,
 }
 
 /// Model parameters
@@ -314,10 +317,12 @@ fn default_model() -> String {
     // Default model depends on provider
     // For Gemini: "gemini-pro" is most stable
     // For OpenAI: "gpt-3.5-turbo" or "gpt-4"
+    // For Ollama: "cogito-2.1:671b" is available on the user's account
     std::env::var("PROMPTLINE_PROVIDER")
         .ok()
         .and_then(|p| match p.as_str() {
             "gemini" => Some("gemini-pro".to_string()),
+            "ollama" => Some("cogito-2.1:671b".to_string()),
             _ => None,
         })
         .unwrap_or_else(|| "gpt-3.5-turbo".to_string())
@@ -340,7 +345,7 @@ fn default_true() -> bool {
 }
 
 fn default_max_iterations() -> usize {
-    10
+    20
 }
 
 fn default_mode() -> String {

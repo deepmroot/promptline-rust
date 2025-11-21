@@ -1,0 +1,28 @@
+warning: field `done` is never read
+  --> src\model\ollama.rs:29:5
+   |
+27 | struct OllamaResponse {
+   |        -------------- field in this struct
+28 |     message: OllamaMessage,
+29 |     done: bool,
+   |     ^^^^
+   |
+   = note: `OllamaResponse` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `promptline` (lib) generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.43s
+     Running `target\debug\promptline.exe "read README.md and summarize it"`
+ΓÜÖ∩╕Å  Agent mode
+
+Task: read README.md and summarize it
+
+[2m2025-11-21T10:01:17.706090Z[0m [32m INFO[0m [2mpromptline::agent[0m[2m:[0m Starting agent run for task: read README.md and summarize it
+[2m2025-11-21T10:01:17.775327Z[0m [32m INFO[0m [2mpromptline::model::ollama[0m[2m:[0m Ollama Chat: URL=https://ollama.com/api/chat, Key=***, Model=cogito-2.1:671b
+Error: Model error: API error: Ollama API error: unauthorized
+
+
+Caused by:
+    API error: Ollama API error: unauthorized
+    
+error: process didn't exit successfully: `target\debug\promptline.exe "read README.md and summarize it"` (exit code: 1)

@@ -1,0 +1,31 @@
+models:
+  default: "gpt-oss:120b-cloud"
+  providers:
+    ollama:
+      base_url: "https://ollama.com"
+      api_key: "edbed07b7b0945599c0111133eb98dfa.mOilfWJN_ypipy0UFdd7XgJ7"
+      models:
+        - gpt-oss:120b-cloud
+        - gemma3:1b
+
+tools:
+  file_read: allow
+  file_write: ask
+  file_delete: deny
+  shell_execute: ask
+
+safety:
+  require_approval: false
+  require_diff_preview: true
+  max_iterations: 10
+  enable_backups: true
+  dangerous_commands:
+    - "^rm -rf /"
+    - "^mkfs"
+    - "^dd if="
+    - "^format [A-Z]:"
+
+agent:
+  default_mode: "chat"
+  use_chain_of_thought: true
+  explain_before_action: true

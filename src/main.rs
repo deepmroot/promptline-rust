@@ -6,11 +6,12 @@ use promptline::{model::openai::OpenAIProvider, tools::*};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize logging
+    // Initialize logging - only show warnings and errors by default
+    // Set RUST_LOG=info to see debug logs
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
+                .add_directive(tracing::Level::WARN.into()),
         )
         .init();
 
@@ -56,13 +57,12 @@ async fn main() -> anyhow::Result<()> {
             handle_edit(&file, &instruction, config).await?;
         }
         None => {
-            // Direct task execution
+            // Direct task execution or start chat mode
             if let Some(task) = cli.task {
                 handle_agent(&task, config).await?;
             } else {
-                // No command or task, show help
-                println!("PromptLine v{}", promptline::VERSION);
-                println!("\nUse --help for usage information");
+                // No command or task, start interactive chat by default
+                handle_chat(config).await?;
             }
         }
     }
@@ -157,9 +157,33 @@ async fn handle_agent(task: &str, config: Config) -> anyhow::Result<()> {
 
     // Create model provider based on type
     let model: Box<dyn promptline::model::LanguageModel> = match provider.as_str() {
+        "ollama" => {
+            let api_key = std::env::var("OLLAMA_API_KEY").ok().or_else(|| {
+                config.models.providers.get("ollama")
+                    .and_then(|p| p.api_key.clone())
+            });
+            
+            let base_url = config.models.providers.get("ollama")
+                .and_then(|p| p.base_url.clone());
+
+            Box::new(promptline::model::ollama::OllamaProvider::new(
+                base_url,
+                api_key,
+                Some(config.models.default.clone())
+            ))
+        }
         "openai" | _ => {
-            let api_key = std::env::var("OPENAI_API_KEY")
-                .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY not set. Run 'promptline init' for setup."))?;
+            // Try environment variable first
+            let api_key = std::env::var("OPENAI_API_KEY").ok().or_else(|| {
+                // Fallback to config
+                config.models.providers.get("openai")
+                    .and_then(|p| p.api_key.clone())
+            });
+
+            let api_key = api_key.ok_or_else(|| {
+                anyhow::anyhow!("OPENAI_API_KEY not set. You can set it via:\n1. Environment variable: OPENAI_API_KEY\n2. Config file: ~/.promptline/config.yaml (under models.providers.openai.api_key)")
+            })?;
+
             Box::new(OpenAIProvider::new(api_key, Some(config.models.default.clone())))
         }
     };
@@ -198,9 +222,124 @@ async fn handle_agent(task: &str, config: Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_chat(_config: Config) -> anyhow::Result<()> {
-    println!("💬 Interactive chat mode\n");
-    println!("This is a placeholder. Phase 2 will implement REPL mode.");
+async fn handle_chat(config: Config) -> anyhow::Result<()> {
+    use std::io::{self, Write};
+    
+    // Clear screen and show banner
+    print!("\x1b[2J\x1b[1;1H");
+    
+    // ASCII Art Banner
+    println!("\x1b[1;34m");
+    println!(r#"
+    ██████╗ ██████╗  ██████╗ ███╗   ███╗██████╗ ████████╗██╗     ██╗███╗   ██╗███████╗
+    ██╔══██╗██╔══██╗██╔═══██╗████╗ ████║██╔══██╗╚══██╔══╝██║     ██║████╗  ██║██╔════╝
+    ██████╔╝██████╔╝██║   ██║██╔████╔██║██████╔╝   ██║   ██║     ██║██╔██╗ ██║█████╗  
+    ██╔═══╝ ██╔══██╗██║   ██║██║╚██╔╝██║██╔═══╝    ██║   ██║     ██║██║╚██╗██║██╔══╝  
+    ██║     ██║  ██║╚██████╔╝██║ ╚═╝ ██║██║        ██║   ███████╗██║██║ ╚████║███████╗
+    ╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝╚═╝        ╚═╝   ╚══════╝╚═╝╚═╝  ╚═══╝╚══════╝
+    "#);
+    println!("\x1b[0m");
+    
+    println!("\x1b[32m    PromptLine v{} (Rust) - Agentic AI CLI\x1b[0m", promptline::VERSION);
+    println!("\x1b[90m    Type a command to see the agent in action (e.g., \"refactor main.rs\" or \"explain this code\")\x1b[0m");
+    println!();
+
+    // Get provider from environment or use default
+    let provider = std::env::var("PROMPTLINE_PROVIDER").unwrap_or_else(|_| "openai".to_string());
+
+    // Create model based on provider
+    let model: Box<dyn promptline::model::LanguageModel> = match provider.as_str() {
+        "ollama" => {
+            let api_key = std::env::var("OLLAMA_API_KEY").ok().or_else(|| {
+                config.models.providers.get("ollama")
+                    .and_then(|p| p.api_key.clone())
+            });
+            
+            let base_url = config.models.providers.get("ollama")
+                .and_then(|p| p.base_url.clone());
+
+            Box::new(promptline::model::ollama::OllamaProvider::new(
+                base_url,
+                api_key,
+                Some(config.models.default.clone())
+            ))
+        }
+        "openai" | _ => {
+            let api_key = std::env::var("OPENAI_API_KEY").ok().or_else(|| {
+                config.models.providers.get("openai")
+                    .and_then(|p| p.api_key.clone())
+            });
+
+            let api_key = api_key.ok_or_else(|| {
+                anyhow::anyhow!("OPENAI_API_KEY not set")
+            })?;
+
+            Box::new(OpenAIProvider::new(api_key, Some(config.models.default.clone())))
+        }
+    };
+
+    // Register tools
+    let mut tools = ToolRegistry::new();
+    tools.register(file_ops::FileReadTool::new());
+    tools.register(file_ops::FileWriteTool::new());
+    tools.register(file_ops::FileListTool::new());
+    tools.register(git_ops::GitStatusTool::new());
+    tools.register(git_ops::GitDiffTool::new());
+    tools.register(web_ops::WebGetTool::new());
+    tools.register(search_ops::CodebaseSearchTool::new());
+
+    // Create agent once
+    let mut agent = Agent::new(model, tools, config, Vec::new()).await?;
+
+    loop {
+        // Print prompt with arrow like in the image
+        print!("\n\x1b[32m→ ~ \x1b[0m");
+        io::stdout().flush()?;
+
+        // Read user input
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let input = input.trim();
+
+        // Check for exit commands
+        if input.is_empty() {
+            continue;
+        }
+        if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
+            println!("\n👋 Goodbye!");
+            break;
+        }
+
+        // Run agent with user input
+        print!("\n\x1b[1;34mPromptLine:\x1b[0m ");
+        io::stdout().flush()?;
+
+        match agent.run(input).await {
+            Ok(result) => {
+                // Find the last assistant message in the conversation history
+                // This contains the actual response, not just "FINISH"
+                let last_response = agent.conversation_history
+                    .iter()
+                    .rev()
+                    .find(|msg| msg.role == "assistant")
+                    .map(|msg| msg.content.as_str())
+                    .unwrap_or(&result.output);
+                
+                if !last_response.is_empty() && last_response != "FINISH" {
+                    // Format the response to strip model identity and clean up
+                    let formatted = agent.format_response(last_response);
+                    if !formatted.trim().starts_with("Tool '") {
+                        // Don't print tool execution messages, only actual responses
+                        println!("{}\n", formatted);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("\n\x1b[1;31mError:\x1b[0m {}\n", e);
+            }
+        }
+    }
+
     Ok(())
 }
 

@@ -52,7 +52,8 @@ impl SafetyValidator {
             }
         }
 
-        ValidationResult::RequiresApproval
+        // Allow tool calls by default (they're already permission-gated)
+        ValidationResult::Allowed
     }
 
     /// Request approval from user

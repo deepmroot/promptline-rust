@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod gemini;
 pub mod openai;
+pub mod ollama;
 
 /// Message in a conversation
 #[derive(Debug, Clone, Serialize, Deserialize)]

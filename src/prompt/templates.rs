@@ -90,7 +90,7 @@ variables:
         "#;
         fs::write(templates_path.join("test_template.yaml"), template_content).await.unwrap();
 
-        let manager = TemplateManager::new().await.unwrap();
+        let _manager = TemplateManager::new().await.unwrap();
         // Override templates_dir for test
         let mut manager = TemplateManager {
             templates_dir: templates_path,

@@ -32,6 +32,9 @@ pub enum PromptLineError {
     #[error("Dialoguer error: {0}")]
     Dialoguer(#[from] dialoguer::Error),
 
+    #[error("Anyhow error: {0}")]
+    Anyhow(#[from] anyhow::Error),
+
     #[error("{0}")]
     Other(String),
 }

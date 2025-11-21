@@ -3,10 +3,14 @@
 // Library entry point exposing public API
 
 pub mod agent;
+pub mod commands;
 pub mod config;
 pub mod context;
 pub mod error;
+pub mod formatter;
+pub mod loading;
 pub mod model;
+pub mod permissions;
 pub mod prompt;
 pub mod safety;
 pub mod tools;

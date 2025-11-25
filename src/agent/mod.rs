@@ -511,6 +511,7 @@ mod tests {
         let mut config = Config::default();
         config.safety.require_approval = false;
         let permission_manager = std::sync::Arc::new(std::sync::Mutex::new(crate::permissions::PermissionManager::new().unwrap()));
+        permission_manager.lock().unwrap().set_permission("file_list".to_string(), crate::permissions::PermissionLevel::Always).unwrap();
         let mut agent = Agent::new(model, tools, config, Vec::new(), permission_manager).await.unwrap();
 
         let result = agent.run("List the files").await.unwrap();

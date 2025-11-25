@@ -61,7 +61,7 @@ Test 4: Permission System
   Expected:
     - Permission prompt if first time
     - Tool execution with 📄 icon
-    - NO raw "Execute tool" messages
+    - NO raw "Execute tool" mepssages
 
 Test 5: Search with Formatting
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━

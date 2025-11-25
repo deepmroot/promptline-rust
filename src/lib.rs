@@ -12,6 +12,7 @@ pub mod loading;
 pub mod model;
 pub mod permissions;
 pub mod prompt;
+pub mod repl;
 pub mod safety;
 pub mod tools;
 pub mod util;

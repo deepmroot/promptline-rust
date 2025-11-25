@@ -3,7 +3,7 @@
 use super::{Tool, ToolContext, ToolResult};
 use crate::error::{Result, ToolError};
 use async_trait::async_trait;
-use std::path::Path;
+
 use crate::util::diff::display_diff;
 use dialoguer::Confirm;
 
@@ -49,20 +49,27 @@ impl Tool for FileReadTool {
         true
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext, _config: &crate::config::Config) -> Result<ToolResult> {
-        let path = args["path"]
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext, _config: &crate::config::Config) -> Result<ToolResult> {
+        let path_str = args["path"]
             .as_str()
             .ok_or_else(|| ToolError::InvalidArgs("Missing path".to_string()))?;
 
-        tracing::info!("Reading file: {}", path);
+        // Resolve path relative to working directory
+        let path = if std::path::Path::new(path_str).is_absolute() {
+            std::path::PathBuf::from(path_str)
+        } else {
+            ctx.working_dir.join(path_str)
+        };
+
+        tracing::info!("Reading file: {} (resolved from {})", path.display(), path_str);
 
         // Check if file exists
-        if !Path::new(path).exists() {
-            return Ok(ToolResult::error(format!("File not found: {}", path)));
+        if !path.exists() {
+            return Ok(ToolResult::error(format!("File not found: {}", path.display())));
         }
 
         // Check file size (limit to 1MB for safety)
-        let metadata = tokio::fs::metadata(path).await?;
+        let metadata = tokio::fs::metadata(&path).await?;
         if metadata.len() > 1_000_000 {
             return Ok(ToolResult::error(format!(
                 "File too large: {} bytes (max 1MB)",
@@ -71,7 +78,7 @@ impl Tool for FileReadTool {
         }
 
         // Read file
-        let content = tokio::fs::read_to_string(path).await.map_err(|e| {
+        let content = tokio::fs::read_to_string(&path).await.map_err(|e| {
             ToolError::ExecutionFailed(format!("Failed to read file: {}", e))
         })?;
 
@@ -125,8 +132,8 @@ impl Tool for FileWriteTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext, config: &crate::config::Config) -> Result<ToolResult> {
-        let path = args["path"]
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolContext, config: &crate::config::Config) -> Result<ToolResult> {
+        let path_str = args["path"]
             .as_str()
             .ok_or_else(|| ToolError::InvalidArgs("Missing path".to_string()))?;
 
@@ -134,12 +141,28 @@ impl Tool for FileWriteTool {
             .as_str()
             .ok_or_else(|| ToolError::InvalidArgs("Missing content".to_string()))?;
 
-        tracing::info!("Writing to file: {}", path);
+        // Resolve path relative to working directory
+        let path = if std::path::Path::new(path_str).is_absolute() {
+            std::path::PathBuf::from(path_str)
+        } else {
+            ctx.working_dir.join(path_str)
+        };
+
+        tracing::info!("Writing to file: {} (resolved from {})", path.display(), path_str);
+
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                    ToolError::ExecutionFailed(format!("Failed to create parent directory {}: {}", parent.display(), e))
+                })?;
+            }
+        }
 
         // If file exists, generate and display diff
-        if Path::new(path).exists() {
-            let original_content = tokio::fs::read_to_string(path).await.unwrap_or_default();
-            display_diff(path, &original_content, content);
+        if path.exists() {
+            let original_content = tokio::fs::read_to_string(&path).await.unwrap_or_default();
+            display_diff(path_str, &original_content, content);
 
             if config.safety.require_diff_preview {
                 let confirmation = Confirm::new()
@@ -154,11 +177,11 @@ impl Tool for FileWriteTool {
         }
 
         // Write file
-        tokio::fs::write(path, content).await.map_err(|e| {
+        tokio::fs::write(&path, content).await.map_err(|e| {
             ToolError::ExecutionFailed(format!("Failed to write file: {}", e))
         })?;
 
-        Ok(ToolResult::success(format!("Successfully wrote {} bytes to {}", content.len(), path))
+        Ok(ToolResult::success(format!("Successfully wrote {} bytes to {}", content.len(), path.display()))
             .with_metadata("path", serde_json::json!(path))
             .with_metadata("bytes_written", serde_json::json!(content.len())))
     }
@@ -206,15 +229,26 @@ impl Tool for FileListTool {
     }
 
     async fn execute(&self, args: serde_json::Value, ctx: &ToolContext, _config: &crate::config::Config) -> Result<ToolResult> {
-        let path = args["path"]
+        let path_str = args["path"]
             .as_str()
             .map(|s| s.to_string())
-            .unwrap_or_else(|| ctx.working_dir.to_string_lossy().to_string());
+            .unwrap_or_else(|| ".".to_string());
 
-        tracing::info!("Listing directory: {}", path);
+        // Resolve path relative to working directory
+        let path = if std::path::Path::new(&path_str).is_absolute() {
+            std::path::PathBuf::from(&path_str)
+        } else {
+            ctx.working_dir.join(&path_str)
+        };
+
+        tracing::info!("Listing directory: {} (resolved from {})", path.display(), path_str);
+
+        if !path.exists() {
+             return Ok(ToolResult::error(format!("Directory not found: {}", path.display())));
+        }
 
         let mut entries = tokio::fs::read_dir(&path).await.map_err(|e| {
-            ToolError::ExecutionFailed(format!("Failed to read directory: {}", e))
+            ToolError::ExecutionFailed(format!("Failed to read directory {}: {}", path.display(), e))
         })?;
 
         let mut files = Vec::new();

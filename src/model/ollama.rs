@@ -26,6 +26,7 @@ impl OllamaProvider {
 #[derive(Debug, Deserialize)]
 struct OllamaResponse {
     message: OllamaMessage,
+    #[allow(dead_code)]
     done: bool,
 }
 

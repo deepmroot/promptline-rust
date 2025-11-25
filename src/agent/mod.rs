@@ -3,15 +3,16 @@
 use crate::config::Config;
 use crate::error::{AgentError, Result};
 use crate::model::{LanguageModel, Message};
-use crate::tools::{ToolContext, ToolRegistry, Tool};
+use crate::tools::{ToolContext, ToolRegistry};
 use crate::prompt::templates::TemplateManager;
-use regex::Regex;
+
 use serde::{Deserialize, Serialize};
 
 use crate::safety::SafetyValidator;
 use crate::permissions::PermissionManager;
 use crate::formatter::ResponseFormatter;
 use crate::loading::LoadingIndicator;
+use std::sync::{Arc, Mutex};
 
 /// Agent for orchestrating LLM interactions and tool execution
 pub struct Agent {
@@ -19,7 +20,7 @@ pub struct Agent {
     tools: ToolRegistry,
     config: Config,
     safety_validator: SafetyValidator,
-    permission_manager: PermissionManager,
+    permission_manager: Arc<Mutex<PermissionManager>>,
     template_manager: TemplateManager,
     formatter: ResponseFormatter,
     iteration_count: usize,
@@ -42,9 +43,9 @@ impl Agent {
         tools: ToolRegistry,
         config: Config,
         conversation_history: Vec<Message>,
+        permission_manager: Arc<Mutex<PermissionManager>>,
     ) -> Result<Self> {
         let safety_validator = SafetyValidator::new(config.clone())?;
-        let permission_manager = PermissionManager::new()?;
         let template_manager = TemplateManager::new().await?;
         let formatter = ResponseFormatter::new();
         Ok(Self {
@@ -115,7 +116,30 @@ impl Agent {
 
             // ACT: Parse and execute tool calls
             if let Some(tool_call) = self.parse_tool_call(&response.content) {
+                // Clone tool call for later use (displaying output)
+                let tool_call_clone = ParsedToolCall {
+                    name: tool_call.name.clone(),
+                    args: tool_call.args.clone(),
+                };
+
                 let result = self.execute_tool_call(tool_call, &mut tool_calls).await?;
+                
+                // If this was a file write, show the content that was written
+                if tool_call_clone.name == "file_write" && result.success {
+                    if let Some(content) = tool_call_clone.args.get("content").and_then(|c| c.as_str()) {
+                        let path = tool_call_clone.args.get("path").and_then(|p| p.as_str()).unwrap_or("unknown");
+                        let ext = std::path::Path::new(path)
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("txt");
+                        
+                        println!("\n\x1b[1;32mWritten to {}:\x1b[0m", path);
+                        println!("```{}", ext);
+                        println!("{}", content);
+                        println!("```\n");
+                    }
+                }
+
                 if !result.success {
                     return Ok(result);
                 }
@@ -132,7 +156,14 @@ impl Agent {
 
         // Check permission using the new permission manager
         use crate::permissions::PermissionLevel;
-        let permission_level = self.permission_manager.check_permission(&tool_call.name);
+        
+        // Lock the permission manager
+        // We need to be careful about holding the lock across await points
+        // prompt_for_permission is synchronous (uses dialoguer), so it's fine
+        let permission_level = {
+            let pm = self.permission_manager.lock().unwrap();
+            pm.check_permission(&tool_call.name)
+        };
         
         match permission_level {
             PermissionLevel::Never => {
@@ -140,8 +171,13 @@ impl Agent {
             }
             PermissionLevel::Ask => {
                 // Prompt user for permission
-                let allowed = self.permission_manager.prompt_for_permission(&tool_call.name)
-                    .map_err(|e| crate::error::PromptLineError::Other(e.to_string()))?;
+                // We need to lock again for mutation
+                let allowed = {
+                    let mut pm = self.permission_manager.lock().unwrap();
+                    pm.prompt_for_permission(&tool_call.name)
+                        .map_err(|e| crate::error::PromptLineError::Other(e.to_string()))?
+                };
+                
                 if !allowed {
                     return Ok(AgentResult {
                         success: false,
@@ -306,6 +342,18 @@ Current working directory: {}
 Current project type: {}
 {}
 
+IDENTITY & BRANDING:
+You are PromptLine, an advanced AI-powered CLI agent.
+- You are NOT "Cogito", "Claude", "GPT", or any other model.
+- You are a helpful, professional, and witty engineering assistant.
+- If asked about your identity, always reply that you are PromptLine.
+- Do not apologize excessively. Be concise and action-oriented.
+
+OUTPUT FORMAT:
+- Use Markdown for all responses.
+- Use emojis sparingly but effectively to convey status (e.g., 🔍 for search, 📝 for writing).
+- Keep responses clean and structured.
+
 You can use the following tools:
 {}
 
@@ -343,16 +391,25 @@ AVAILABLE TOOLS:
 - file_read: Read file contents
 - file_write: Write to a file
 - file_list: List directory contents
+- shell_execute: Run shell commands (use this to run scripts, e.g., 'node app.js', 'cargo run')
 - git_status: Check git status
 - git_diff: Show git diff
 - web_get: Fetch web content
 - codebase_search: Search code
 
 TOOL USAGE FORMAT:
-When you need to use a tool, respond with:
-{"tool": "tool_name", "args": {"arg1": "value1"}}
+When you need to use a tool, respond with JSON:
+{"tool": "tool_name", "args": {"arg_name": "value"}}
 
-Remember: Don't use tools for simple conversation - just chat naturally!"###.to_string()
+Example for running a command:
+{"tool": "shell_execute", "args": {"command": "node hello.js"}}
+
+Remember:
+1. If the user asks to "run" something, USE `shell_execute`. Do not just explain how to run it.
+2. If you write a file that needs to be run, you can immediately follow up with `shell_execute` to run it.
+3. **NEW PROJECT RULE**: If asked to create a new project, app, or website, **ALWAYS** create a new directory for it first using `shell_execute` (e.g., `mkdir my-app`). Then write files into that directory.
+   - **EXCEPTION**: If the user explicitly asks to add to or modify the *current* project, or if you are already inside the project directory (e.g., you see `package.json` or `Cargo.toml`), do NOT create a new folder. Work in the current directory.
+4. Don't use tools for simple conversation - just chat naturally!"###.to_string()
     }
 
     fn parse_tool_call(&self, content: &str) -> Option<ParsedToolCall> {
@@ -382,46 +439,7 @@ Remember: Don't use tools for simple conversation - just chat naturally!"###.to_
         self.formatter.format_response(content)
     }
 
-    async fn inject_file_content(&mut self, model_response_content: &str) -> Result<()> {
-        // Stricter regex: allow alphanumeric, underscores, dashes, dots, and slashes.
-        // Must start and end with word boundary or whitespace-like boundary.
-        // Avoids matching quotes, brackets, etc.
-        let re = Regex::new(r"(?m)(^|\s|['`])([\w\-\./]+\.(rs|toml|yaml|md|txt|json|lock|sh|ps1))\b").unwrap();
-        let file_read_tool = crate::tools::file_ops::FileReadTool::new();
 
-        for mat in re.captures_iter(model_response_content) {
-            let file_path = mat.get(2).map_or("", |m| m.as_str());
-            // Check if the file content is already in the history to avoid duplicates
-            if !self.conversation_history.iter().any(|msg| msg.content.contains(&format!("File content of {}:\n```", file_path))) {
-                tracing::info!("Injecting content of file: {}", file_path);
-                let args = serde_json::json!({"path": file_path});
-                let ctx = crate::tools::ToolContext::default();
-                let tool_result = file_read_tool.execute(args, &ctx, &self.config).await?;
-
-                if tool_result.success {
-                    let mut content_to_inject = tool_result.output;
-                    let estimated_tokens = self.model.estimate_tokens(&content_to_inject);
-                    let max_inject_tokens = 1000; // Arbitrary limit for injected content
-
-                    if estimated_tokens > max_inject_tokens {
-                        // Truncate content if too long
-                        let chars_to_keep = (max_inject_tokens * 4) as usize; // Rough estimate: 1 token = 4 chars
-                        content_to_inject = content_to_inject.chars().take(chars_to_keep).collect();
-                        content_to_inject.push_str("\n... (content truncated due to length)");
-                        tracing::warn!("File content of {} truncated from {} to {} tokens.", file_path, estimated_tokens, max_inject_tokens);
-                    }
-
-                    self.conversation_history.push(Message::system(format!(
-                        "File content of {}:\n```\n{}\n```",
-                        file_path, content_to_inject
-                    )));
-                } else {
-                    tracing::warn!("Failed to read file {}: {}", file_path, tool_result.error.unwrap_or_default());
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug)]

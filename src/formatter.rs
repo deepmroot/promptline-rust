@@ -70,6 +70,10 @@ impl ResponseFormatter {
             "I am GPT",
             "I'm ChatGPT",
             "I am ChatGPT",
+            "As an AI language model",
+            "As an AI model",
+            "I am a large language model",
+            "I'm a large language model",
         ];
 
         let mut result = content.to_string();
@@ -83,6 +87,14 @@ impl ResponseFormatter {
     /// Format a complete response with proper structure
     pub fn format_response(&self, content: &str) -> String {
         let cleaned = self.strip_model_identity(content);
+        
+        // Remove FINISH keyword from end
+        let cleaned = if cleaned.trim().ends_with("FINISH") {
+            let without_finish = cleaned.trim_end().strip_suffix("FINISH").unwrap_or(&cleaned);
+            without_finish.trim_end().to_string()
+        } else {
+            cleaned
+        };
         
         // Add proper spacing and structure
         cleaned

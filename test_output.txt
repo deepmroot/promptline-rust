@@ -1,0 +1,39 @@
+   Compiling promptline v0.1.0 (Z:\promptline-rust)
+warning: unused import: `std::path::PathBuf`
+ --> tests\permission_integration.rs:4:5
+  |
+4 | use std::path::PathBuf;
+  |     ^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `manager`
+  --> tests\permission_integration.rs:79:9
+   |
+79 |     let manager = PermissionManager::new()....
+   |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_manager`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `promptline` (test "permission_integration") generated 2 warnings (run `cargo fix --test "permission_integration"` to apply 1 suggestion)
+error[E0308]: mismatched types
+   --> src\agent\mod.rs:514:70
+    |
+514 |         let mut agent = Agent::new(model, tools, config, Vec::new(), permission_manager).await.unwrap();
+    |                         ----------                                   ^^^^^^^^^^^^^^^^^^ expected `Arc<Mutex<PermissionManager>>`, found `Arc<Mutex<Result<..., ...>>>`
+    |                         |
+    |                         arguments to this function are incorrect
+    |
+    = note: expected struct `Arc<std::sync::Mutex<permissions::PermissionManager>>`
+               found struct `Arc<std::sync::Mutex<std::result::Result<permissions::PermissionManager, anyhow::Error>>>`
+note: associated function defined here
+   --> src\agent\mod.rs:41:18
+    |
+ 41 |     pub async fn new(
+    |                  ^^^
+...
+ 46 |         permission_manager: Arc<Mutex<PermissionManager>>,
+    |         -------------------------------------------------
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `promptline` (lib test) due to 1 previous error

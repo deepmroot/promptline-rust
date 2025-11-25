@@ -510,7 +510,8 @@ mod tests {
 
         let mut config = Config::default();
         config.safety.require_approval = false;
-        let mut agent = Agent::new(model, tools, config, Vec::new()).await.unwrap();
+        let permission_manager = std::sync::Arc::new(std::sync::Mutex::new(crate::permissions::PermissionManager::new().unwrap()));
+        let mut agent = Agent::new(model, tools, config, Vec::new(), permission_manager).await.unwrap();
 
         let result = agent.run("List the files").await.unwrap();
 

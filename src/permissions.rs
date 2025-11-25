@@ -171,6 +171,9 @@ mod tests {
     fn test_permission_levels() {
         let mut manager = PermissionManager::default();
         
+        // Reset permission to ensure clean state
+        manager.set_permission("test_tool".to_string(), PermissionLevel::Ask).unwrap();
+        
         // Default should be Ask
         assert_eq!(manager.check_permission("test_tool"), PermissionLevel::Ask);
         

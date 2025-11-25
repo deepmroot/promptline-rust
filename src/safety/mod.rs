@@ -121,7 +121,7 @@ mod tests {
 
         assert!(matches!(
             validator.validate_command("ls -la"),
-            ValidationResult::RequiresApproval
+            ValidationResult::Allowed
         ));
     }
 

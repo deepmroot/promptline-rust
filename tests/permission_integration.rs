@@ -1,7 +1,7 @@
 // Integration test for permission system
 // Run with: cargo test --test test_permission_integration
 
-use std::path::PathBuf;
+
 
 #[test]
 fn test_permission_manager_creation() {
@@ -76,7 +76,7 @@ fn test_session_only_permissions() {
 fn test_permission_storage_location() {
     use promptline::permissions::PermissionManager;
     
-    let manager = PermissionManager::new().unwrap();
+    let _manager = PermissionManager::new().unwrap();
     
     // Just verify we can create it without errors
     // The actual path is in ~/.promptline/permissions.yaml

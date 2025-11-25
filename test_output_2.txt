@@ -1,0 +1,88 @@
+warning: unused import: `std::path::PathBuf`
+ --> tests\permission_integration.rs:4:5
+  |
+4 | use std::path::PathBuf;
+  |     ^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `manager`
+  --> tests\permission_integration.rs:79:9
+   |
+79 |     let manager = PermissionManager::new()....
+   |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_manager`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `promptline` (test "permission_integration") generated 2 warnings (run `cargo fix --test "permission_integration"` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.85s
+     Running unittests src\lib.rs (target\debug\deps\promptline-6d16fc2af2bd9394.exe)
+
+running 34 tests
+test commands::tests::test_parse_commands ... ok
+test model::tests::test_token_estimation ... ok
+test formatter::tests::test_strip_identity ... ok
+test config::tests::test_default_config ... FAILED
+test model::gemini::tests::test_gemini_provider_creation ... ok
+test model::openai::tests::test_message_conversion ... ok
+test model::gemini::tests::test_message_conversion ... ok
+test config::tests::test_config_serialization ... ok
+test model::tests::test_message_creation ... ok
+test model::openai::tests::test_openai_provider_creation ... ok
+test safety::tests::test_dangerous_command_detection ... FAILED
+test permissions::tests::test_permission_levels ... FAILED
+test safety::tests::test_protected_file_detection ... ok
+test context::tests::test_history_persistence ... ok
+test tools::file_ops::tests::test_file_read ... ok
+test prompt::templates::tests::test_template_manager ... ok
+test tools::file_ops::tests::test_file_list ... ok
+test tools::tests::test_missing_required_field ... ok
+test tools::tests::test_tool_registry ... ok
+test tools::web_ops::tests::test_web_get_failure ... ok
+test tools::file_ops::tests::test_file_write ... ok
+test tools::web_ops::tests::test_web_get_success ... ok
+test util::diff::tests::test_empty_diff ... ok
+test util::diff::tests::test_generate_diff ... ok
+test tools::shell::tests::test_shell_execute_failure ... ok
+test tools::shell::tests::test_shell_execute_success ... ok
+test agent::tests::test_agent_simple_task ... ok
+test tools::git_ops::tests::test_git_status ... ok
+test tools::search_ops::tests::test_codebase_search_success ... ok
+test tools::search_ops::tests::test_codebase_search_no_match ... ok
+test tools::git_ops::tests::test_git_commit ... ok
+test tools::git_ops::tests::test_git_diff ... ok
+test tools::search_ops::tests::test_codebase_search_invalid_pattern ... ok
+test tools::shell::tests::test_shell_timeout ... ok
+
+failures:
+
+---- config::tests::test_default_config stdout ----
+
+thread 'config::tests::test_default_config' (16996) panicked at src\config.rs:384:9:
+assertion `left == right` failed
+  left: "llama3"
+ right: "gpt-3.5-turbo"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- safety::tests::test_dangerous_command_detection stdout ----
+
+thread 'safety::tests::test_dangerous_command_detection' (9124) panicked at src\safety\mod.rs:122:9:
+assertion failed: matches!(validator.validate_command("ls -la"),
+    ValidationResult::RequiresApproval)
+
+---- permissions::tests::test_permission_levels stdout ----
+
+thread 'permissions::tests::test_permission_levels' (26964) panicked at src\permissions.rs:175:9:
+assertion `left == right` failed
+  left: Always
+ right: Ask
+
+
+failures:
+    config::tests::test_default_config
+    permissions::tests::test_permission_levels
+    safety::tests::test_dangerous_command_detection
+
+test result: FAILED. 31 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.24s
+
+error: test failed, to rerun pass `--lib`

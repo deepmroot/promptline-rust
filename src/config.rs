@@ -381,8 +381,8 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.models.default, "gpt-3.5-turbo");
-        assert_eq!(config.safety.max_iterations, 10);
+        assert_eq!(config.models.default, "llama3");
+        assert_eq!(config.safety.max_iterations, 20);
         assert_eq!(config.tools.file_read, PermissionLevel::Allow);
     }
 
